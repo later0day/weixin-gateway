@@ -146,8 +146,8 @@ async function main() {
   // 7. VIDEO — URL
   if (!voiceOnly) {
     printSection('VIDEO (URL)');
-    // Small public domain test video
-    const testVideoUrl = 'https://www.w3schools.com/html/mov_bbb.mp4';
+    // Big Buck Bunny clip — Google Cloud Storage (open-source, CC BY 3.0)
+    const testVideoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
     try {
       await gw.sendVideo(wxId, testVideoUrl);
       console.log(' ', ok('VIDEO: OK'));

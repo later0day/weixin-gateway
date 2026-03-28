@@ -309,6 +309,87 @@ class MyAdapter {
 }
 ```
 
+## Development
+
+### Project Layout
+
+```
+weixin-gateway/
+├── index.js            # Public API — createWeixinGateway, createWeixinRouter
+├── adapters/
+│   └── memory.js       # Built-in MemoryAdapter (no persistence)
+├── lib/
+│   ├── ilink.js        # iLink/OpenClaw HTTP client — uploadMedia, sendItem
+│   ├── media.js        # Media send helpers — image, video, file, Bilibili
+│   ├── tts.js          # TTS pipeline — Edge TTS → ffmpeg PCM → silk-sdk SILK
+│   └── voice.js        # Voice name resolver (alias → ShortName)
+├── config/
+│   └── instruction.md  # Bundled Claude Code prompt template
+├── examples/
+│   ├── server.js       # Full HTTP + AI backend example
+│   ├── media-test.js   # Standalone media send test (no server needed)
+│   └── quickstart.js   # Minimal onMessage example
+└── scripts/
+    └── qr-login.js     # Headless QR login helper
+```
+
+### Setup
+
+```bash
+git clone <repo>
+cd weixin-gateway
+npm install
+```
+
+External dependencies (install separately):
+
+| Tool | Required | Purpose |
+|---|---|---|
+| `ffmpeg` | Yes | PCM transcoding for TTS voice pipeline |
+| `yt-dlp` | No | Bilibili video download (`sendVideo` with bilibili.com links) |
+
+### Running Tests
+
+```bash
+npm test
+```
+
+Tests use Jest with `supertest`. No WeChat account or network connection required — all iLink calls are mocked.
+
+### Running Examples
+
+**Full server (needs WeChat scan):**
+
+```bash
+node examples/server.js
+# Scan the QR code in the terminal, then send a WeChat message to trigger onMessage
+```
+
+**Media test (requires a saved session from `server.js`):**
+
+```bash
+node examples/media-test.js            # all media types
+node examples/media-test.js --no-voice # skip TTS (no ffmpeg needed)
+node examples/media-test.js --voice-only
+```
+
+The test reads credentials from `/tmp/weixin-gateway-session.json` written by `server.js` after a successful QR login.
+
+### Key Internals
+
+**CDN token flow (video / image / file):**
+
+1. `ilink.uploadMedia(wxId, filePath, mediaType)` calls `getuploadurl` to get a pre-signed `upload_param`, encrypts the file with AES-128-ECB, and POSTs ciphertext to the CDN.
+2. The CDN responds with `x-encrypted-param` (short token, ~320–700 chars) in the response header.
+3. This `shortParam` is returned as `downloadEncryptedQueryParam` and used in the `media` object sent to WeChat — it's what the WeChat client uses to fetch the content.
+4. `uploadParam` (the pre-signed upload URL token) is **not** a valid download token for image/video/file — do not use it in `media.encrypt_query_param` for these types.
+
+**Voice is different:** as of 2026-03-27 the CDN stopped issuing `x-encrypted-query-param` for `mediaType=4`. TTS uses `uploadParam` as the download token — this is a confirmed CDN quirk specific to SILK/voice uploads.
+
+### Adding a Storage Adapter
+
+Copy `adapters/memory.js` as a starting point and implement the interface documented in the [Storage Adapter](#storage-adapter) section.
+
 ## License
 
 MIT

@@ -311,6 +311,87 @@ class MyAdapter {
 
 默认使用内置 `MemoryAdapter`（无持久化）。
 
+## 开发指南
+
+### 项目结构
+
+```
+weixin-gateway/
+├── index.js            # 公开 API — createWeixinGateway、createWeixinRouter
+├── adapters/
+│   └── memory.js       # 内置 MemoryAdapter（无持久化）
+├── lib/
+│   ├── ilink.js        # iLink/OpenClaw HTTP 客户端 — uploadMedia、sendItem
+│   ├── media.js        # 媒体发送 — 图片、视频、文件、B站
+│   ├── tts.js          # TTS 管道 — Edge TTS → ffmpeg PCM → silk-sdk SILK
+│   └── voice.js        # 音色名称解析器（别名 → ShortName）
+├── config/
+│   └── instruction.md  # 内置 Claude Code 提示词模板
+├── examples/
+│   ├── server.js       # 完整 HTTP + AI 后端示例
+│   ├── media-test.js   # 独立媒体发送测试（无需 HTTP server）
+│   └── quickstart.js   # 最简 onMessage 示例
+└── scripts/
+    └── qr-login.js     # 无头扫码登录脚本
+```
+
+### 本地开发
+
+```bash
+git clone <repo>
+cd weixin-gateway
+npm install
+```
+
+外部依赖（需单独安装）：
+
+| 工具 | 是否必须 | 用途 |
+|---|---|---|
+| `ffmpeg` | 必须 | TTS 语音管道的 PCM 转码 |
+| `yt-dlp` | 可选 | B站视频下载（仅 `sendVideo` 传入 bilibili.com 链接时需要） |
+
+### 运行测试
+
+```bash
+npm test
+```
+
+使用 Jest + supertest，无需微信账号或网络连接，所有 iLink 调用均已 mock。
+
+### 运行示例
+
+**完整服务（需要微信扫码）：**
+
+```bash
+node examples/server.js
+# 扫描终端中的二维码，然后向机器人发一条微信消息以触发 onMessage
+```
+
+**媒体发送测试（需先用 server.js 保存一次 session）：**
+
+```bash
+node examples/media-test.js               # 全部媒体类型
+node examples/media-test.js --no-voice    # 跳过 TTS（不需要 ffmpeg）
+node examples/media-test.js --voice-only
+```
+
+测试脚本从 `server.js` 扫码成功后写入的 `/tmp/weixin-gateway-session.json` 读取凭证。
+
+### 核心机制说明
+
+**CDN token 流程（视频 / 图片 / 文件）：**
+
+1. `ilink.uploadMedia(wxId, filePath, mediaType)` 调用 `getuploadurl` 获取预签名 `upload_param`，用 AES-128-ECB 加密文件后 POST 到 CDN。
+2. CDN 在响应 header 中返回 `x-encrypted-param`（短 token，约 320–700 字符）。
+3. 该 `shortParam` 作为 `downloadEncryptedQueryParam` 返回，填入发给微信的 `media` 对象——这是微信客户端用来从 CDN 下载内容的 token。
+4. `uploadParam`（预签名上传 token）**不是**有效的下载 token，图片/视频/文件的 `media.encrypt_query_param` **不能**使用它。
+
+**语音的特殊情况：** 2026-03-27 起，CDN 对 `mediaType=4` 不再返回 `x-encrypted-query-param`，TTS 管道改用 `uploadParam` 作为下载 token——这是 SILK/语音上传特有的 CDN 行为。
+
+### 自定义存储适配器
+
+以 `adapters/memory.js` 为模板，实现[存储适配器接口](#存储适配器接口)章节中列出的所有方法即可。
+
 ## License
 
 MIT

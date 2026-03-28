@@ -85,6 +85,10 @@ await gw.start();   // displays QR, blocks until connected
 
 Once a user sends their first message, their `contextToken` is captured and you can push any media at any time — no polling, no extra setup.
 
+> **⚠️ contextToken expiry** — The token is bound to session activity. If no messages are exchanged for an extended period (typically 1–2 hours of inactivity), the token expires and **all media sends (`sendImage`, `sendVideo`, `sendFile`, `sendVoice`) will silently fail** — the API returns `ret:-2` but no exception is thrown. `sendText` is not affected.
+>
+> **When using `gw.restore()`** with a saved session, always ensure the target user has sent at least one WeChat message to the bot recently before calling any media send method. When running the live gateway (`gw.start()` or `createWeixinRouter`), the fetch interceptor keeps tokens fresh automatically.
+
 ```js
 await gw.sendText(wxId, 'Hello!');
 await gw.sendVoice(wxId, 'Text converted to WeChat voice bubble via TTS');  // TTS → SILK
@@ -374,6 +378,8 @@ node examples/media-test.js --voice-only
 ```
 
 The test reads credentials from `/tmp/weixin-gateway-session.json` written by `server.js` after a successful QR login.
+
+> **Note:** Run the test immediately after the bot receives a WeChat message. The `contextToken` expires after ~1–2 hours of inactivity — media sends will silently fail (`ret:-2`) if the token is stale.
 
 ### Key Internals
 

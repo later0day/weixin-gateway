@@ -85,6 +85,10 @@ await gw.start();   // 显示二维码，阻塞直到登录成功
 
 用户发出第一条消息后，`contextToken` 自动捕获，此后可随时主动推送任意媒体——无需轮询，无需额外配置。
 
+> **⚠️ contextToken 过期说明** — token 与会话活跃度绑定。若双方长时间无消息往来（通常约 1–2 小时不活跃），token 将失效。此时**所有媒体发送（`sendImage`、`sendVideo`、`sendFile`、`sendVoice`）会静默失败**——微信 API 返回 `ret:-2`，但不会抛出异常。`sendText` 不受影响。
+>
+> **使用 `gw.restore()` 注入已保存 session 时**，在调用任何媒体发送方法前，请确保目标用户最近向机器人发送过一条微信消息以刷新 token。使用正常运行的 gateway（`gw.start()` 或 `createWeixinRouter`）时，fetch 拦截器会持续自动捕获最新 token，无需手动处理。
+
 ```js
 await gw.sendText(wxId, '你好！');
 await gw.sendVoice(wxId, '文字自动转为微信语音气泡');        // TTS → SILK
@@ -376,6 +380,8 @@ node examples/media-test.js --voice-only
 ```
 
 测试脚本从 `server.js` 扫码成功后写入的 `/tmp/weixin-gateway-session.json` 读取凭证。
+
+> **注意：** 建议在机器人收到一条微信消息后立即执行测试。`contextToken` 在约 1–2 小时不活跃后失效，token 过期时媒体发送会静默失败（`ret:-2`）。
 
 ### 核心机制说明
 

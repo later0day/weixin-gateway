@@ -13,7 +13,7 @@
  *   all    — 上述全部
  */
 
-const { createWeixinGateway, MemoryAdapter } = require('..');
+const { createWeixinGateway, MemoryAdapter } = require('weixin-gateway');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 
@@ -93,5 +93,5 @@ gw.subscribe(event => {
   if (event.type === 'status') console.log(`[状态] ${event.state}`);
 });
 
-console.log('启动 weixin-gateway v' + require('../package.json').version);
+console.log('启动 weixin-gateway v' + require('weixin-gateway/package.json').version);
 gw.start().catch(err => { console.error('启动失败：', err.message); process.exit(1); });

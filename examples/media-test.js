@@ -18,7 +18,7 @@ const path = require('path');
 const os   = require('os');
 const QRCode = require('qrcode');
 
-const { createWeixinGateway, MemoryAdapter } = require('..');
+const { createWeixinGateway, MemoryAdapter } = require('weixin-gateway');
 
 const TOKEN_FILE = '/tmp/weixin-gateway-session.json';
 

@@ -7,8 +7,8 @@
  * 用法：node examples/voices.js
  */
 
-const { createWeixinGateway, MemoryAdapter } = require('..');
-const { resolveVoice } = require('../lib/voice');
+const { createWeixinGateway, MemoryAdapter } = require('weixin-gateway');
+const { resolveVoice } = require('weixin-gateway/lib/voice');
 
 // 要演示的音色列表：[别名, 文字内容]
 const DEMO_VOICES = [

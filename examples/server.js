@@ -18,7 +18,7 @@ const http    = require('http');
 const fs      = require('fs');
 const express = require('express');
 const QRCode  = require('qrcode');
-const { createWeixinRouter, MemoryAdapter } = require('..');
+const { createWeixinRouter, MemoryAdapter } = require('weixin-gateway');
 
 // contextToken 落盘路径（供 push-demo / tts 等手动测试读取）
 const TOKEN_FILE = '/tmp/weixin-gateway-session.json';

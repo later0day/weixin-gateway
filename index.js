@@ -10,7 +10,7 @@ const fs               = require('fs');
 const os               = require('os');
 const path             = require('path');
 const QRCode           = require('qrcode');
-const { WECHAT_VOICE_DEFAULT } = require('./lib/voice');
+const { WECHAT_VOICE_DEFAULT, resolveVoice } = require('./lib/voice');
 const { createILinkClient }                       = require('./lib/ilink');
 const { createTtsPipeline }                       = require('./lib/tts');
 const { createMediaSender }                       = require('./lib/media');
@@ -619,10 +619,11 @@ function createWeixinGateway(config = {}) {
     return ilink.sendText(wxId, text, meta.contextToken, 2);
   }
 
-  async function sendVoice(wxId, text) {
+  async function sendVoice(wxId, text, voice) {
     if (!ilink.loaded) throw new Error('iLink not loaded — connect WeChat first');
     const meta = sessionMeta.get(wxId);
     if (!meta?.contextToken) throw new Error(`No contextToken for ${wxId} — send a WeChat message first`);
+    if (voice) _userVoice.set(wxId, resolveVoice(voice) || voice);
     return generateAndSendVoice(wxId, text, meta.contextToken);
   }
 

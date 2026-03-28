@@ -143,15 +143,28 @@ async function main() {
     }
   }
 
-  // 7. VIDEO — URL
+  // 7. VIDEO — ffmpeg-generated local file (small, guaranteed within WeChat's ~10 MB limit)
   if (!voiceOnly) {
-    printSection('VIDEO (URL)');
-    // Big Buck Bunny clip — Google Cloud Storage (open-source, CC BY 3.0)
-    const testVideoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    printSection('VIDEO (local ffmpeg)');
+    const videoPath = path.join(os.tmpdir(), `weixin-test-${Date.now()}.mp4`);
     try {
-      await gw.sendVideo(wxId, testVideoUrl);
+      await new Promise((resolve, reject) => {
+        const { execFile } = require('child_process');
+        execFile('ffmpeg', [
+          '-y',
+          '-f', 'lavfi', '-i', 'color=c=blue:s=320x240:d=2',
+          '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac', '-b:a', '64k',
+          videoPath,
+        ], { timeout: 15000 }, (err) => err ? reject(err) : resolve());
+      });
+      const sizeMB = (fs.statSync(videoPath).size / 1024 / 1024).toFixed(2);
+      console.log(' ', info(`generated ${sizeMB} MB video`));
+      await gw.sendVideo(wxId, videoPath);
       console.log(' ', ok('VIDEO: OK'));
     } catch (err) { console.error(' ', fail(`VIDEO: ${err.message}`)); }
+    finally { try { fs.unlinkSync(videoPath); } catch {} }
   }
 
   console.log(`\n${C.bold}测试完成${C.reset}\n`);

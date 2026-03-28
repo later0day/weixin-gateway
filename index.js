@@ -118,7 +118,7 @@ function createWeixinGateway(config = {}) {
   });
 
   // ── Media sender ──────────────────────────────────────────────────────────────
-  const { sendImageFromUrl, sendLocalImageFile, sendVideoFromUrl, downloadAndSendBilibili } =
+  const { sendImageFromUrl, sendLocalImageFile, sendLocalVideoFile, sendVideoFromUrl, downloadAndSendBilibili } =
     createMediaSender({ ilink, ffmpeg: FFMPEG, ytdlp: YTDLP, mediaEnv: MEDIA_ENV });
 
   // ── Daemon state ─────────────────────────────────────────────────────────────
@@ -334,9 +334,10 @@ function createWeixinGateway(config = {}) {
 
       logMessage(openId, 'in', text || (media ? `[${media.type || 'media'}]` : ''));
 
-      if (!_onMessage) return null;
+      if (!_onMessage) return {};
 
-      return _onMessage({ wxId: openId, text, media, contextToken: updated.contextToken, sendMessage });
+      const result = await _onMessage({ wxId: openId, text, media, contextToken: updated.contextToken, sendMessage });
+      return result ?? {};
     }
 
     clearSession(conversationId) {
@@ -633,12 +634,13 @@ function createWeixinGateway(config = {}) {
     return sendLocalImageFile(wxId, meta.contextToken, urlOrPath);
   }
 
-  async function sendVideo(wxId, url) {
+  async function sendVideo(wxId, urlOrPath) {
     if (!ilink.loaded) throw new Error('iLink not loaded — connect WeChat first');
     const meta = sessionMeta.get(wxId);
     if (!meta?.contextToken) throw new Error(`No contextToken for ${wxId} — send a WeChat message first`);
-    if (/bilibili\.com\/video/.test(url)) return downloadAndSendBilibili(wxId, meta.contextToken, url);
-    return sendVideoFromUrl(wxId, meta.contextToken, url);
+    if (/bilibili\.com\/video/.test(urlOrPath)) return downloadAndSendBilibili(wxId, meta.contextToken, urlOrPath);
+    if (/^https?:\/\//.test(urlOrPath)) return sendVideoFromUrl(wxId, meta.contextToken, urlOrPath);
+    return sendLocalVideoFile(wxId, meta.contextToken, urlOrPath);
   }
 
   async function sendFile(wxId, filePath) {

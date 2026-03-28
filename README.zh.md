@@ -1,8 +1,20 @@
 # weixin-gateway
 
-微信个人号助理网关 — 扫码登录、contextToken 自动捕获、TTS 语音、主动媒体发送，基于 [weixin-agent-sdk](https://www.npmjs.com/package/weixin-agent-sdk)。
+**中文 | [English](./README.md)**
 
-消息处理器由你定义，可通过本地 tmux 接入任意 Agent，也可直接调用 API——不绑定任何 AI 后端。
+将任意 AI 后端接入微信个人号——扫码登录、contextToken 自动捕获、主动多媒体推送，内置 TTS → SILK 语音合成管道。
+
+> **不绑定任何 AI 后端。** `onMessage` 是一个普通的异步回调函数，接入 Claude、GPT、本地 Agent 或任何其他服务，完全由你决定。
+
+## 为什么选 weixin-gateway？
+
+| 痛点 | 解决方式 |
+|---|---|
+| contextToken 难以获取 | 通过 fetch 拦截器在每次 getupdates 响应时自动捕获，透明无感 |
+| 没有历史上下文无法主动推送 | 用户发出第一条消息后 token 自动持久化，此后随时推送任意媒体 |
+| 微信语音需要专有 SILK 格式 | 内置管道：Edge TTS → ffmpeg PCM → silk-sdk SILK，一行代码发语音气泡 |
+| 视频发送场景碎片化 | `sendVideo(wxId, urlOrPath)` 统一处理直链、本地文件、B站链接 |
+| 消息路由绑死特定 AI | `onMessage` 回调完全由业务层控制；`config.commands` 在 AI 之前拦截快捷指令 |
 
 ## 架构
 
@@ -16,11 +28,11 @@ flowchart TD
     IL <-->|getupdates / send API| SDK
 
     subgraph GW["weixin-gateway"]
-        CTX["① contextToken 自动捕获"]
-        CMD["② config.commands\n指令拦截（可选）"]
-        MSG["③ config.onMessage\n消息处理器（你来实现）"]
+        CTX["① contextToken 自动捕获\n（透明，无需手动处理）"]
+        CMD["② config.commands\n快捷指令拦截（可选）"]
+        MSG["③ config.onMessage\n你的 AI / 业务逻辑"]
         SEND["iLink Client\ngw.sendText · sendVoice\nsendImage · sendVideo · sendFile"]
-        TTS["TTS 管道\nmsedge-tts · ffmpeg · SILK"]
+        TTS["TTS 管道\nEdge TTS · ffmpeg · SILK"]
 
         CTX --> CMD
         CMD -->|"命中 → 直接回复"| SEND
@@ -45,6 +57,8 @@ flowchart TD
 npm install weixin-gateway
 ```
 
+依赖：**Node ≥ 18**、**ffmpeg**（TTS 语音必须）。yt-dlp 可选，仅 B站链接需要。
+
 ## 快速上手
 
 ```js
@@ -53,127 +67,51 @@ const { createWeixinGateway, MemoryAdapter } = require('weixin-gateway');
 const gw = createWeixinGateway({
   storage: new MemoryAdapter(),
   onMessage: async ({ wxId, text, media }) => {
-    // 每条入站微信消息都会调用这里
     const reply = await myAI(text);
     return { text: reply };   // 返回 { text } → 自动回复
-    // 返回 null              → 不自动回复，自行调用 gw.sendText / sendVoice 等
+    // 返回 null              → 不自动回复，自行调用 gw.send*
   },
 });
 
-// 订阅登录事件
 gw.subscribe(event => {
   if (event.type === 'qr')     console.log('请扫描二维码：', event.qrUrl);
-  if (event.type === 'status') console.log('状态变化：', event.state);
+  if (event.type === 'status') console.log('状态：', event.state);
 });
 
-await gw.start();   // 显示二维码，阻塞直到微信登录成功
+await gw.start();   // 显示二维码，阻塞直到登录成功
 ```
 
-### 主动发送消息
+## 媒体发送
 
-用户发过一条消息后，contextToken 自动捕获，之后可随时主动推送：
+用户发出第一条消息后，`contextToken` 自动捕获，此后可随时主动推送任意媒体——无需轮询，无需额外配置。
 
 ```js
 await gw.sendText(wxId, '你好！');
-await gw.sendVoice(wxId, '这是一条语音消息');           // TTS → SILK
-await gw.sendImage(wxId, 'https://example.com/img.jpg'); // URL 或本地路径
-await gw.sendVideo(wxId, url);                           // B站链接自动下载
-await gw.sendFile(wxId, '/path/to/report.pdf');
+await gw.sendVoice(wxId, '文字自动转为微信语音气泡');        // TTS → SILK
+await gw.sendImage(wxId, 'https://example.com/img.jpg');  // HTTP URL 或本地路径
+await gw.sendImage(wxId, '/tmp/screenshot.png');
+await gw.sendVideo(wxId, 'https://example.com/clip.mp4'); // 直链
+await gw.sendVideo(wxId, '/tmp/local.mp4');               // 本地文件
+await gw.sendVideo(wxId, 'https://www.bilibili.com/video/BVxxx'); // B站自动下载
+await gw.sendFile(wxId,  '/path/to/report.pdf');
 ```
 
-### 使用已有凭证（免扫码）
+### TTS 语音管道
 
-如果已有有效 session，直接注入，跳过二维码：
+`sendVoice` 将文字转为原生微信语音气泡，无需手动处理音频文件：
 
-```js
-const gw = createWeixinGateway({ storage: new MemoryAdapter() });
-
-// accountId 和 sessions 来自之前的 gw.getStatus()
-gw.restore(accountId, [{ wxId, contextToken, nickname }]);
-
-await gw.sendText(wxId, '你好');
+```
+文字 → Edge TTS（MP3）→ ffmpeg（PCM s16le 16kHz）→ silk-sdk（SILK）→ 微信 CDN → voice_item
 ```
 
-## HTTP 服务（Express）
+通过 `config.voice` 或 `lib/voice.js` 按用户或全局切换音色：
 
 ```js
-const express = require('express');
-const { createWeixinRouter, MemoryAdapter } = require('weixin-gateway');
+const { resolveVoice } = require('weixin-gateway/lib/voice');
 
-const app = express();
-app.use(express.json());
-
-const { router, autoStartIfLoggedIn } = createWeixinRouter({
-  storage: new MemoryAdapter(),
-  onMessage: async ({ wxId, text }) => {
-    return { text: `收到：${text}` };
-  },
-});
-
-app.use('/weixin', router);
-app.listen(3000, () => {
-  autoStartIfLoggedIn().catch(console.error);   // 有保存的 token 则自动重连
-});
-```
-
-## 配置项
-
-| 选项 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `storage` | `StorageAdapter` | `MemoryAdapter` | 存储适配器，用于消息/会话持久化。 |
-| `onMessage` | `async (params) => {text}\|null` | `null` | 消息处理回调。参数：`{ wxId, text, media, contextToken, sendMessage }`。返回 `{ text }` 自动回复，返回 `null` 则自行处理。 |
-| `voice` | `string` | `zh-CN-XiaoxiaoNeural` | 默认 TTS 音色。支持所有 [Edge TTS ShortName](https://learn.microsoft.com/zh-cn/azure/ai-services/speech-service/language-support)。 |
-| `commands` | `Command[]` | `[]` | 消息前置指令拦截器（见下方）。 |
-| `ffmpegPath` | `string` | 自动检测 | 手动指定 ffmpeg 路径。 |
-| `ytdlpPath` | `string` | 自动检测 | 手动指定 yt-dlp 路径。 |
-
-### `config.commands` — 指令拦截器
-
-指令在 `onMessage` 之前执行。匹配成功则直接回复，不再调用 `onMessage`。
-
-```js
-const gw = createWeixinGateway({
-  commands: [
-    {
-      match(text, wxId) {
-        if (text === '/ping') return 'pong';
-        return null;   // 未匹配 → 继续走 onMessage
-      },
-      usage: '/ping',
-      desc: '连通性测试',
-    },
-    {
-      match(text, wxId) {
-        const m = text.match(/^\/echo (.+)/);
-        if (m) return m[1];
-        return null;
-      },
-      usage: '/echo <内容>',
-      desc: '回显消息',
-    },
-  ],
-});
-```
-
-- `match(text, wxId)` — 返回字符串即为回复内容，返回 `null`/`undefined` 表示未匹配
-- `usage` + `desc` — 可选；两者都设置时，用户发送 `/help` 或 `帮助` 会自动生成指令列表
-
-## TTS 音色
-
-`lib/voice.js` 导出音色查询工具，方便实现切换音色指令：
-
-```js
-const { VOICE_ALIASES, VOICE_NOTES, resolveVoice } = require('weixin-gateway/lib/voice');
-
-// 列出所有可用音色
-Object.entries(VOICE_NOTES).forEach(([alias, note]) => {
-  console.log(`${alias}（${VOICE_ALIASES[alias]}）— ${note}`);
-});
-
-// 将别名 / 拼音 / ShortName 解析为标准 ShortName
 resolveVoice('晓晓')              // → 'zh-CN-XiaoxiaoNeural'
 resolveVoice('yunxi')             // → 'zh-CN-YunxiNeural'
-resolveVoice('zh-CN-YunxiNeural') // → 'zh-CN-YunxiNeural'
+resolveVoice('zh-CN-YunxiNeural') // 完整 ShortName 直接透传
 resolveVoice('unknown')           // → null
 
 // 示例：切换音色指令
@@ -191,7 +129,74 @@ commands: [{
 }]
 ```
 
-内置别名涵盖：普通话（晓晓/晓伊/云希/云扬…）、方言（东北/陕西/台湾/粤语）、英语（ava/emma/andrew/brian/jenny…）。直接传入含 "Neural" 的完整 ShortName 也可透传。
+内置别名涵盖：普通话（晓晓/晓伊/云希/云扬…）、方言（东北/陕西/台湾/粤语）、英语（ava/emma/andrew/brian/jenny…）。含 "Neural" 的完整 ShortName 直接透传。
+
+## 指令拦截器
+
+`config.commands` 在 `onMessage` 之前执行，适合快捷回复、开关控制、管理命令等不需要 AI 处理的场景：
+
+```js
+commands: [
+  {
+    match(text, wxId) {
+      if (text === '/ping') return 'pong';
+    },
+    usage: '/ping',
+    desc: '连通性测试',
+  },
+  {
+    match(text, wxId) {
+      const m = text.match(/^\/echo (.+)/);
+      if (m) return m[1];
+    },
+    usage: '/echo <内容>',
+    desc: '回显消息',
+  },
+],
+```
+
+- `match(text, wxId)` — 返回字符串即为回复内容；不返回则继续走 `onMessage`
+- 任意指令设置了 `usage` + `desc`，即自动启用 `/help` 和 `帮助` 指令列表
+
+## HTTP 服务（Express）
+
+```js
+const express = require('express');
+const { createWeixinRouter, MemoryAdapter } = require('weixin-gateway');
+
+const app = express();
+app.use(express.json());
+
+const { router, autoStartIfLoggedIn } = createWeixinRouter({
+  storage: new MemoryAdapter(),
+  onMessage: async ({ wxId, text }) => ({ text: `收到：${text}` }),
+});
+
+app.use('/weixin', router);
+app.listen(3000, () => {
+  autoStartIfLoggedIn().catch(console.error); // 有保存的 token 则自动重连
+});
+```
+
+### 使用已有凭证（免扫码）
+
+有效 session 可直接注入，跳过二维码：
+
+```js
+gw.restore(accountId, [{ wxId, contextToken, nickname }]);
+await gw.sendText(wxId, '重新上线');
+```
+
+## 配置项
+
+| 选项 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `storage` | `StorageAdapter` | `MemoryAdapter` | 消息与会话持久化适配器。 |
+| `onMessage` | `async (params) => {text}\|null` | `null` | 消息处理回调。参数：`{ wxId, text, media, contextToken, sendMessage }`。返回 `{ text }` 自动回复，返回 `null` 则自行调用 `gw.send*`。 |
+| `voice` | `string` | `zh-CN-XiaoxiaoNeural` | 默认 TTS 音色。支持所有 [Edge TTS ShortName](https://learn.microsoft.com/zh-cn/azure/ai-services/speech-service/language-support)。 |
+| `commands` | `Command[]` | `[]` | `onMessage` 前置指令拦截器。 |
+| `ffmpegPath` | `string` | 自动检测 | 手动指定 ffmpeg 路径。 |
+| `ytdlpPath` | `string` | 自动检测 | 手动指定 yt-dlp 路径（仅 B站需要）。 |
 
 ## SDK 接口
 
@@ -199,8 +204,8 @@ commands: [{
 
 | 方法 | 说明 |
 |---|---|
-| `gw.start()` | 启动守护进程，显示二维码，等待扫码。 |
-| `gw.stop()` | 停止守护进程，断开微信连接。 |
+| `gw.start()` | 启动，显示二维码，等待扫码。 |
+| `gw.stop()` | 停止并断开连接。 |
 | `gw.startIfLoggedIn()` | 使用已保存的 token 自动重连。未登录时无操作。 |
 | `gw.restore(accountId, sessions)` | 注入已有凭证，免扫码。`sessions`：`[{ wxId, contextToken, nickname? }]` |
 
@@ -208,36 +213,36 @@ commands: [{
 
 | 方法 | 说明 |
 |---|---|
-| `gw.getStatus()` | 返回 `{ state, accountId, sessions }`。`state`：`'idle'|'qr_pending'|'connected'` |
-| `gw.getSessions()` | 返回 `sessions` 数组。每项：`{ wxId, nickname, lastActive, contextToken }` |
+| `gw.getStatus()` | 返回 `{ state, accountId, sessions }`。state：`'idle'|'qr_pending'|'connected'` |
+| `gw.getSessions()` | 返回会话数组：`[{ wxId, nickname, lastActive, contextToken }]` |
 
 ### 发送消息
 
-所有发送方法在 contextToken 未就绪时会抛出异常。
+所有发送方法在目标用户的 `contextToken` 未就绪时会抛出异常。
 
 | 方法 | 说明 |
 |---|---|
 | `gw.sendText(wxId, text)` | 发送文字消息。 |
-| `gw.sendVoice(wxId, text)` | 文字转语音（TTS → SILK）后发送。 |
+| `gw.sendVoice(wxId, text)` | TTS → SILK 语音气泡。 |
 | `gw.sendImage(wxId, urlOrPath)` | 发送图片，支持 HTTP URL 或本地文件路径。 |
-| `gw.sendVideo(wxId, url)` | 发送视频。B站链接自动调用 yt-dlp 下载。 |
+| `gw.sendVideo(wxId, urlOrPath)` | 发送视频，支持 HTTP URL、本地文件路径或 B站链接。 |
 | `gw.sendFile(wxId, filePath)` | 发送本地文件。 |
 
 ### 事件订阅
 
 ```js
-const unsubscribe = gw.subscribe(event => {
+const off = gw.subscribe(event => {
   // event.type === 'qr'     → { qrUrl: string }   二维码更新
   // event.type === 'status' → { state: string }    状态变化
 });
-unsubscribe(); // 取消订阅
+off(); // 取消订阅
 ```
 
 ### 会话管理
 
 | 方法 | 说明 |
 |---|---|
-| `gw.deleteSession(wxId)` | 从内存中移除该用户的会话（存储记录保留）。 |
+| `gw.deleteSession(wxId)` | 从内存中移除该用户会话（存储记录保留）。 |
 
 ## HTTP 路由
 
@@ -258,29 +263,26 @@ unsubscribe(); // 取消订阅
 
 ## 内置指令模板
 
-包内附带一份完整的 Claude Code 微信助理提示词，路径为 `config/instruction.md`。
+`config/instruction.md` 是一份生产可用的 Claude Code 提示词模板，涵盖场景自动识别（技术/调研/翻译/写作/闲聊）、纯文本输出规范，以及 gateway 能自动解析的媒体标记：
 
-涵盖：场景自动识别（技术/调研/翻译/写作/闲聊）、纯文本输出规范、媒体标记（`[图片:]` `[视频:]` `[B站视频:]` `[截图:]`）、浏览器截图 + 录屏流程。
+```
+[图片: https://...]     → 下载后作为图片发送
+[视频: https://...]     → 下载后作为视频发送
+[B站视频: https://...]  → yt-dlp 下载后发送
+[截图: /tmp/ss.png]    → 直接发送本地文件
+```
 
 适用于"写入指令文件 → AI 读取并将回复写入响应文件"的文件交互后端模式：
 
 ```js
-const path = require('path');
-const fs   = require('fs');
+const tplPath  = require.resolve('weixin-gateway/config/instruction.md');
+const template = require('fs').readFileSync(tplPath, 'utf8');
 
-// 读取内置模板
-const tplPath  = path.join(path.dirname(require.resolve('weixin-gateway')), 'config', 'instruction.md');
-const template = fs.readFileSync(tplPath, 'utf8');
-
-// 在 onMessage 中使用
 onMessage: async ({ wxId, text }) => {
   const responseFile = `/tmp/resp-${Date.now()}.txt`;
-  const instruction  = template
-    .replace('{{message}}',      text)
-    .replace('{{responseFile}}', responseFile);
-
-  // 将指令写入文件，让 AI Agent 读取后将回复写入 responseFile
-  fs.writeFileSync(`/tmp/input-${Date.now()}.txt`, instruction);
+  require('fs').writeFileSync(`/tmp/input-${Date.now()}.txt`,
+    template.replace('{{message}}', text).replace('{{responseFile}}', responseFile)
+  );
   // ... 等待 responseFile 出现，读取内容后返回
 }
 ```
@@ -291,33 +293,23 @@ onMessage: async ({ wxId, text }) => {
 
 ```js
 class MyAdapter {
-  // 消息
   saveMessage(wxId, direction, content, pairId, ts) {}
-  getMessages(wxId, limit, offset)      // → { messages, total }
-  getRounds(wxId, limit, offset)        // → { rounds, total }
-  getUnpairedMessages()                 // → [{ id, wx_id, direction }]
-  updateMessagePairIds(updates)         // updates: [{ id, pairId }]
-  getMaxPairIds()                       // → [{ wx_id, max_pair }]
-  deleteOldMessages(cutoffTs)           // → { changes }
+  getMessages(wxId, limit, offset)     // → { messages, total }
+  getRounds(wxId, limit, offset)       // → { rounds, total }
+  getUnpairedMessages()                // → [{ id, wx_id, direction }]
+  updateMessagePairIds(updates)        // updates: [{ id, pairId }]
+  getMaxPairIds()                      // → [{ wx_id, max_pair }]
+  deleteOldMessages(cutoffTs)          // → { changes }
 
-  // 媒体 Blob
-  saveMedia(wxId, pairId, direction, mediaType, mime, data, ts)  // → id
-  getMedia(id)                          // → { mime, data } | null
+  saveMedia(wxId, pairId, direction, mediaType, mime, data, ts) // → id
+  getMedia(id)                         // → { mime, data } | null
 
-  // 会话
   upsertSession(wxId, nickname, presetType, presetCommand, presetDir, ttsVoice, lastActive, contextToken) {}
-  getSessions()                         // → rows[]
+  getSessions()                        // → rows[]
 }
 ```
 
-默认使用内置的 `MemoryAdapter`（无持久化）。
-
-## 环境依赖
-
-- **Node >= 18**
-- **ffmpeg** — TTS 管道（MP3 → PCM → SILK）
-- **yt-dlp** — B站视频下载（可选）
-- 任意微信账号，扫码登录即可
+默认使用内置 `MemoryAdapter`（无持久化）。
 
 ## License
 

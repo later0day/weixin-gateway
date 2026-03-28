@@ -1,7 +1,7 @@
 {
   "name": "weixin-gateway",
-  "version": "0.1.0",
-  "description": "WeChat personal assistant gateway — QR login, keep-alive, and multi-type message sending via weixin-agent-sdk",
+  "version": "0.2.0",
+  "description": "WeChat personal assistant gateway — QR login, contextToken capture, TTS voice pipeline, and proactive multi-media push. Bring your own AI backend.",
   "main": "index.js",
   "keywords": ["wechat", "weixin", "chatbot", "gateway", "claude", "opencode"],
   "license": "MIT",

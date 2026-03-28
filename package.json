@@ -1,16 +1,26 @@
 {
   "name": "weixin-gateway",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "WeChat personal assistant gateway — QR login, contextToken capture, TTS voice pipeline, and proactive multi-media push. Bring your own AI backend.",
   "main": "index.js",
-  "keywords": ["wechat", "weixin", "chatbot", "gateway", "claude", "opencode"],
+  "keywords": [
+    "wechat",
+    "weixin",
+    "chatbot",
+    "gateway",
+    "claude",
+    "opencode"
+  ],
   "license": "MIT",
-  "engines": { "node": ">=18.0.0" },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "msedge-tts": "^2.0.4",
     "qrcode": "^1.5.4",
     "silk-sdk": "^0.2.2",
-    "weixin-agent-sdk": "^0.2.0"
+    "weixin-agent-sdk": "^0.2.0",
+    "weixin-gateway": "^0.3.1"
   },
   "peerDependencies": {
     "express": ">=4.0.0"
